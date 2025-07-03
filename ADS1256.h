@@ -124,33 +124,38 @@
 #include "SPI.h"
 
 class ADS1256 {
- public:
-  ADS1256(float clockspdMhz, float vref, bool useresetpin);
-  void writeRegister(unsigned char reg, unsigned char wdata);
-  unsigned char readRegister(unsigned char reg);
-  void sendCommand(unsigned char cmd);
-  float readCurrentChannel();
-  long readCurrentChannelRaw();
-  void setConversionFactor(float val);
-  void setChannel(byte channel);
-  void setChannel(byte AIP, byte AIN);
-  void begin(unsigned char drate, unsigned char gain, bool bufferenable);
-  void begin();
-  uint8_t getStatus();  
-  void waitDRDY();
-  boolean isDRDY();
-  void setGain(uint8_t gain);
-  void readTest();
-
- private:
-  void CSON();
-  void CSOFF();
-  unsigned long read_uint24();
-  long read_int32();
-  float read_float32();
-  byte _pga;
-  float _VREF;
-  float _conversionFactor;
+    public:
+        ADS1256(float clockspdMhz, float vref, uint8_t cspin, uint8_t readypin, uint8_t resetpin);
+        void begin(unsigned char drate, unsigned char gain, bool bufferenable);
+        void writeRegister(unsigned char reg, unsigned char wdata);
+        unsigned char readRegister(unsigned char reg);
+        void sendCommand(unsigned char cmd);
+        float readCurrentChannel();
+        long readCurrentChannelRaw();
+        void setConversionFactor(float val);
+        void setChannel(byte channel);
+        void setChannel(byte AIP, byte AIN);
+        uint8_t getStatus();
+        void waitDRDY();
+        boolean isDRDY();
+        void setGain(uint8_t gain);
+        void readTest();
+        SPISettings* GetSPISettings();
+    private:
+        SPISettings ConnectionSettings;
+        void CSON();
+        void CSOFF();
+        unsigned long read_uint24();
+        long read_int32();
+        float read_float32();
+        byte _pga;
+        float _VREF;
+        float _conversionFactor;
+        bool UseReset;
+        bool UseReady;
+        uint8_t ResetPin;
+        uint8_t ReadyPin;
+        uint8_t CSPin;
 };
 
 #endif
