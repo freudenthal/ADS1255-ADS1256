@@ -39,24 +39,79 @@ ADS1256::ADS1256(SPIClass* spi, float clockspdMhz, float vref, uint8_t cspin, ui
   _conversionFactor = 1.0;
   DelayT6 = (uint16_t)((1.0/(float)(clockspdMhz)) * 50.0) + 1;
   DelayT11 = (uint16_t)((1.0/(float)(clockspdMhz)) * 4.0) + 1;
+  SuppressCS = false;
+}
+
+/*
+Init chip with set datarate and gain and perform self calibration
+*/ 
+void ADS1256::begin(unsigned char drate, unsigned char gain, bool buffenable)
+{
+  if (UseReady)
+  {
+    pinMode(ReadyPin, INPUT);
+  }
+  if (UseReset)
+  {
+    // set RESETPIN as output
+    pinMode(ResetPin, OUTPUT);
+    // pull RESETPIN high
+    pinMode(ResetPin, HIGH);
+  }
+  pinMode(CSPin, OUTPUT);
+  pinMode(CSPin, HIGH);
+  _pga = 1 << gain;
+  sendCommand(ADS1256_CMD_SDATAC); // send out ADS1256_CMD_SDATAC command to stop continous reading mode.
+  writeRegister(ADS1256_RADD_DRATE, drate); // write data rate register
+  uint8_t bytemask = B00000111;
+  uint8_t adcon = readRegister(ADS1256_RADD_ADCON);
+  uint8_t byte2send = (adcon & ~bytemask) | gain;
+  writeRegister(ADS1256_RADD_ADCON, byte2send);
+  if (buffenable)
+  {  
+    uint8_t status = readRegister(ADS1256_RADD_STATUS);
+    bitSet(status, 1); 
+    writeRegister(ADS1256_RADD_STATUS, status);
+  }
+  sendCommand(ADS1256_CMD_SELFCAL); // perform self calibration
+  if (UseReady)
+  {
+    waitDRDY();
+  }
+}
+
+void ADS1256::startConversion()
+{
+  CSON(true);
+  sendCommand(ADS1256_CMD_SYNC);
+  sendCommand(ADS1256_CMD_WAKEUP);
+  CSOFF(true);
+}
+
+float ADS1256::ReadAndSwitchChannels(byte channel)
+{
+  float Value;
+  CSON(true);
+  setChannel(channel);
+  startConversion();
+  Value = readCurrentChannel();
+  CSOFF(true);
+  return Value;
 }
 
 void ADS1256::writeRegister(unsigned char reg, unsigned char wdata)
 {
-  SPIBus->beginTransaction(ConnectionSettings);
   CSON();
   SPIBus->transfer(ADS1256_CMD_WREG | reg); // opcode1 Write registers starting from reg
   SPIBus->transfer(0); // opcode2 Write 1+0 registers
   SPIBus->transfer(wdata); // write wdata
   delayMicroseconds(DelayT11);
-  SPIBus->endTransaction();
   CSOFF();
 }
 
 unsigned char ADS1256::readRegister(unsigned char reg)
 {
   unsigned char readValue;
-  SPIBus->beginTransaction(ConnectionSettings);
   CSON();
   SPIBus->transfer(ADS1256_CMD_RREG | reg); // opcode1 read registers starting from reg
   SPIBus->transfer(0); // opcode2 read 1+0 registers
@@ -64,19 +119,16 @@ unsigned char ADS1256::readRegister(unsigned char reg)
   readValue = SPIBus->transfer(0); // read registers
   delayMicroseconds(DelayT11); // t11 delay (4*tCLKIN 4*0.13 = 0.52 us)
   CSOFF();
-  SPIBus->endTransaction();
   return readValue;
 }
 
 void ADS1256::sendCommand(unsigned char reg)
 {
-  SPIBus->beginTransaction(ConnectionSettings);
   CSON();
   waitDRDY();
   SPIBus->transfer(reg);
   delayMicroseconds(DelayT11); // t11 delay (4*tCLKIN 4*0.13 = 0.52 us)
   CSOFF();
-  SPIBus->endTransaction();
 }
 
 void ADS1256::setConversionFactor(float val)
@@ -87,7 +139,6 @@ void ADS1256::setConversionFactor(float val)
 void ADS1256::readTest()
 {
   unsigned char _highByte, _midByte, _lowByte;
-  SPIBus->beginTransaction(ConnectionSettings);
   CSON();
   SPIBus->transfer(ADS1256_CMD_RDATA);
   delayMicroseconds(DelayT6); // t6 delay (4*tCLKIN 50*0.13 = 6.5 us)
@@ -95,31 +146,26 @@ void ADS1256::readTest()
   _midByte = SPIBus->transfer(ADS1256_CMD_WAKEUP);
   _lowByte = SPIBus->transfer(ADS1256_CMD_WAKEUP);
   CSOFF();
-  SPIBus->endTransaction();
 }
 
 float ADS1256::readCurrentChannel()
 {
-  SPIBus->beginTransaction(ConnectionSettings);
   CSON();
   SPIBus->transfer(ADS1256_CMD_RDATA);
   delayMicroseconds(DelayT6); // t6 delay (4*tCLKIN 50*0.13 = 6.5 us)
   float adsCode = read_float32();
   CSOFF();
-  SPIBus->endTransaction();
   return ((adsCode / 0x7FFFFF) * ((2 * _VREF) / (float)_pga)) * _conversionFactor;
 }
 
 // Reads raw ADC data, as 32bit int
 long ADS1256::readCurrentChannelRaw()
 {
-  SPIBus->beginTransaction(ConnectionSettings);
   CSON();
   SPIBus->transfer(ADS1256_CMD_RDATA);
   delayMicroseconds(DelayT6); // t6 delay (4*tCLKIN 50*0.13 = 6.5 us)
   long adsCode = read_int32();
   CSOFF();
-  SPIBus->endTransaction();
   return adsCode;
 }
 
@@ -232,44 +278,7 @@ void ADS1256::setChannel(byte AIN_P, byte AIN_N)
   sendCommand(ADS1256_CMD_SYNC);
   sendCommand(ADS1256_CMD_WAKEUP);
   CSOFF();
-}
 
-/*
-Init chip with set datarate and gain and perform self calibration
-*/ 
-void ADS1256::begin(unsigned char drate, unsigned char gain, bool buffenable)
-{
-  if (UseReady)
-  {
-    pinMode(pinDRDY, INPUT);
-  }
-  if (UseReset)
-  {
-    // set RESETPIN as output
-    pinMode(ResetPin, OUTPUT);
-    // pull RESETPIN high
-    pinMode(pinRST, HIGH);
-  }
-  pinMode(CSPin, OUTPUT);
-  pinMode(CSPin, HIGH);
-  _pga = 1 << gain;
-  sendCommand(ADS1256_CMD_SDATAC); // send out ADS1256_CMD_SDATAC command to stop continous reading mode.
-  writeRegister(ADS1256_RADD_DRATE, drate); // write data rate register
-  uint8_t bytemask = B00000111;
-  uint8_t adcon = readRegister(ADS1256_RADD_ADCON);
-  uint8_t byte2send = (adcon & ~bytemask) | gain;
-  writeRegister(ADS1256_RADD_ADCON, byte2send);
-  if (buffenable)
-  {  
-    uint8_t status = readRegister(ADS1256_RADD_STATUS);
-    bitSet(status, 1); 
-    writeRegister(ADS1256_RADD_STATUS, status);
-  }
-  sendCommand(ADS1256_CMD_SELFCAL); // perform self calibration
-  if (UseReady)
-  {
-    waitDRDY();
-  }
 }
 
 /*
@@ -286,14 +295,40 @@ SPISettings* ADS1263::GetSPISettings()
   return &ConnectionSettings;
 }
 
-void ADS1256::CSON()
+void ADS1256::CSON(bool Supression = false)
 {
-  digitalWrite(CSPin, LOW);
+  if (Supression)
+  {
+    if (!SuppressCS)
+    {
+      SPIBus->beginTransaction(ConnectionSettings);
+      digitalWrite(CSPin, LOW);
+      SuppressCS = true;
+    }
+  }
+  else
+  {
+    SPIBus->beginTransaction(ConnectionSettings);
+    digitalWrite(CSPin, LOW);
+  }
 }
 
-void ADS1256::CSOFF()
+void ADS1256::CSOFF(bool Supression = false)
 {
-  digitalWrite(CSPin, HIGH);
+  if (Supression)
+  {
+    if (SuppressCS)
+    {
+      digitalWrite(CSPin, HIGH);
+      SPIBus->endTransaction();
+      SuppressCS = false;
+    }
+  }
+  else
+  {
+    digitalWrite(CSPin, HIGH);
+    SPIBus->endTransaction();
+  }
 }
 
 void ADS1256::waitDRDY()
@@ -303,19 +338,19 @@ void ADS1256::waitDRDY()
   bool PinState = true;
   while (KeepWaiting)
   {
-      PinState = digitalRead(pinDRDY);
-      if (!PinState)
+    PinState = digitalRead(pinDRDY);
+    if (!PinState)
+    {
+      KeepWaiting = false;
+    }
+    else
+    {
+      if ( (micros() - WaitStart) > 1000000)
       {
+        Serial.println("ADS1256 error on waitDRDY.");
         KeepWaiting = false;
       }
-      else
-      {
-        if ( (micros() - WaitStart) > 1000000)
-        {
-          Serial.println("ADS1256 error on waitDRDY.");
-          KeepWaiting = false;
-        }
-      }
+    }
   }
 }
 

@@ -90,8 +90,10 @@
 class ADS1256
 {
     public:
-        ADS1256(SPIClass* spi, float clockspdMhz, float vref, uint8_t cspin, uint8_t readypin, uint8_t resetpin);
+        ADS1256(SPIClass* spi, float clockspdMhz, float vref, uint8_t cspin, uint8_t readypin = 254, uint8_t resetpin = 254);
         void begin(unsigned char drate, unsigned char gain, bool bufferenable);
+        void startConversion();
+        float ReadAndSwitchChannels(byte channel);
         void writeRegister(unsigned char reg, unsigned char wdata);
         unsigned char readRegister(unsigned char reg);
         void sendCommand(unsigned char cmd);
@@ -109,8 +111,9 @@ class ADS1256
     private:
         SPIClass* SPIBus;
         SPISettings ConnectionSettings;
-        void CSON();
-        void CSOFF();
+        bool SuppressCS;
+        void CSON(bool Suppression);
+        void CSOFF(bool Suppression);
         unsigned long read_uint24();
         long read_int32();
         float read_float32();
