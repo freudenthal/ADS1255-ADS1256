@@ -219,9 +219,6 @@ float ADS1256::readCurrentChannel()
   delayMicroseconds(DelayT6); // t6 delay (4*tCLKIN 50*0.13 = 6.5 us)
   float adsCode = read_float32();
   CSOFF();
-  //Serial.print("absCode:");
-  //Serial.print(adsCode);
-  //Serial.print("\n");
   return ((adsCode / 0x7FFFFF) * ((2 * _VREF) / (float)_pga)) * _conversionFactor;
 }
 
@@ -246,13 +243,6 @@ unsigned long ADS1256::read_uint24()
   _lowByte  = SPIBus->transfer(0);
   // Combine all 3-bytes to 24-bit data using byte shifting.
   value = ((long)_highByte << 16) + ((long)_midByte << 8) + ((long)_lowByte);
-  //Serial.print("bytes:");
-  //Serial.print(_highByte);
-  //Serial.print(",");
-  //Serial.print(_midByte);
-  //Serial.print(",");
-  //Serial.print(_lowByte);
-  //Serial.print("\n");
   return value;
 }
 
@@ -261,9 +251,6 @@ unsigned long ADS1256::read_uint24()
 long ADS1256::read_int32()
 {
   long value = read_uint24();
-  //Serial.print("uint24:");
-  //Serial.print(value);
-  //Serial.print("\n");
   if (value & 0x00800000) // if the 24 bit value is negative reflect it to 32bit
   {
     value |= 0xff000000;
@@ -276,9 +263,6 @@ long ADS1256::read_int32()
 float ADS1256::read_float32()
 {
   long value = read_int32();
-  //Serial.print("int32v:");
-  //Serial.print(value);
-  //Serial.print("\n");
   return (float)value;
 }
 
@@ -353,20 +337,11 @@ void ADS1256::setChannel(byte AIN_P, byte AIN_N)
       MUXN = ADS1256_MUXN_AINCOM;
   }
   MUX_CHANNEL = MUXP | MUXN;
-  //Serial.print("Start MUX set.\n");
   CSON(true);
   writeRegister(ADS1256_RADD_MUX, MUX_CHANNEL);
-  //Serial.print("MUX set ");
-  //Serial.print(AIN_P);
-  //Serial.print(",");
-  //Serial.print(AIN_N);
-  //Serial.print("\n");
   sendCommand(ADS1256_CMD_SYNC);
-  //Serial.print("SYNCED");
   sendCommand(ADS1256_CMD_WAKEUP);
-  //Serial.print("WOKE");
   CSOFF(true);
-  //Serial.print("CS off.\n");
 }
 
 /*
@@ -389,21 +364,17 @@ void ADS1256::CSON(bool Supression)
   {
     if (!SuppressCS)
     {
-      //Serial.print("CS start suppressed.");
       SPIBus->beginTransaction(ConnectionSettings);
       digitalWrite(CSPin, LOW);
       SuppressCS = true;
-      //Serial.print("CS start complete.");
     }
   }
   else
   {
     if (!SuppressCS)
     {
-      //Serial.print("CS start normal.");
       SPIBus->beginTransaction(ConnectionSettings);
       digitalWrite(CSPin, LOW);
-      //Serial.print("CS start complete.");
     }
   }
 }
@@ -414,21 +385,17 @@ void ADS1256::CSOFF(bool Supression)
   {
     if (SuppressCS)
     {
-      //Serial.print("CS end suppressed.");
       digitalWrite(CSPin, HIGH);
       SPIBus->endTransaction();
       SuppressCS = false;
-      //Serial.print("CS end complete.");
     }
   }
   else
   {
     if (!SuppressCS)
     {
-      //Serial.print("CS start normal.");
       digitalWrite(CSPin, HIGH);
       SPIBus->endTransaction();
-      //Serial.print("CS end complete.");
     }
   }
 }
