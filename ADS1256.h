@@ -84,13 +84,15 @@
 #define ADS1256_DRATE_5SPS 0x13
 #define ADS1256_DRATE_2_5SPS 0x03
 
+#define ADS1256_NOPIN 254
+
 #include "Arduino.h"
 #include "SPI.h"
 
 class ADS1256
 {
     public:
-        ADS1256(SPIClass* spi, float clockspdMhz, float vref, uint8_t cspin, uint8_t readypin = 254, uint8_t resetpin = 254);
+        ADS1256(SPIClass* spi, float clockspdMhz, float vref, uint8_t cspin, uint8_t readypin, uint8_t resetpin, uint8_t powerdownpin);
         void begin(unsigned char drate, unsigned char gain, bool bufferenable);
         void startConversion();
         float ReadAndSwitchChannels(byte channel);
@@ -102,6 +104,9 @@ class ADS1256
         void setConversionFactor(float val);
         void setChannel(byte channel);
         void setChannel(byte AIP, byte AIN);
+        void PinMode(uint8_t Pin, uint8_t InOut);
+        bool DigitalRead(uint8_t Pin);
+        void DigitalWrite(uint8_t Pin, bool OffOn);
         uint8_t getStatus();
         void waitDRDY();
         boolean isDRDY();
@@ -114,6 +119,8 @@ class ADS1256
         bool SuppressCS;
         void CSON(bool Suppression);
         void CSOFF(bool Suppression);
+        void CSON();
+        void CSOFF();
         unsigned long read_uint24();
         long read_int32();
         float read_float32();
@@ -122,8 +129,10 @@ class ADS1256
         float _conversionFactor;
         bool UseReset;
         bool UseReady;
+        bool UsePowerDown;
         uint8_t ResetPin;
         uint8_t ReadyPin;
+        uint8_t PowerDownPin;
         uint8_t CSPin;
         uint16_t DelayT11;
         uint16_t DelayT6;

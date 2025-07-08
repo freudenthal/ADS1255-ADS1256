@@ -9,15 +9,16 @@
 #include "Arduino.h"
 #include "SPI.h"
 
-ADS1256::ADS1256(SPIClass* spi, float clockspdMhz, float vref, uint8_t cspin, uint8_t readypin = 254, uint8_t resetpin = 254)
+ADS1256::ADS1256(SPIClass* spi, float clockspdMhz, float vref, uint8_t cspin, uint8_t readypin, uint8_t resetpin, uint8_t powerdownpin)
 {
   SPIBus = spi;
   uint32_t SPISpeed = 1000000; //or clockspdMhz * 1000000 / 4 //May also want 5MHz at most
   ConnectionSettings = SPISettings(SPISpeed, MSBFIRST, SPI_MODE1);
   ReadyPin = readypin;
   ResetPin = resetpin;
+  PowerDownPin = powerdownpin;
   CSPin = cspin;
-  if (ReadyPin != 254)
+  if (ReadyPin != ADS1256_NOPIN)
   {
     UseReady = true;
   }
@@ -25,7 +26,15 @@ ADS1256::ADS1256(SPIClass* spi, float clockspdMhz, float vref, uint8_t cspin, ui
   {
     UseReady = false;
   }
-  if (ResetPin != 254)
+  if (PowerDownPin != ADS1256_NOPIN)
+  {
+    UsePowerDown = true;
+  }
+  else
+  {
+    UsePowerDown = false;
+  }
+  if (ResetPin != ADS1256_NOPIN)
   {
     UseReset = true;
   }
@@ -40,13 +49,6 @@ ADS1256::ADS1256(SPIClass* spi, float clockspdMhz, float vref, uint8_t cspin, ui
   DelayT6 = (uint16_t)((1.0/(float)(clockspdMhz)) * 50.0) + 1;
   DelayT11 = (uint16_t)((1.0/(float)(clockspdMhz)) * 4.0) + 1;
   SuppressCS = false;
-}
-
-/*
-Init chip with set datarate and gain and perform self calibration
-*/ 
-void ADS1256::begin(unsigned char drate, unsigned char gain, bool buffenable)
-{
   if (UseReady)
   {
     pinMode(ReadyPin, INPUT);
@@ -60,12 +62,26 @@ void ADS1256::begin(unsigned char drate, unsigned char gain, bool buffenable)
   }
   pinMode(CSPin, OUTPUT);
   pinMode(CSPin, HIGH);
+  if (UsePowerDown)
+  {
+    pinMode(PowerDownPin, OUTPUT);
+    pinMode(PowerDownPin, HIGH);
+  }
+}
+
+/*
+Init chip with set datarate and gain and perform self calibration
+*/ 
+void ADS1256::begin(unsigned char drate, unsigned char gain, bool buffenable)
+{
   _pga = 1 << gain;
   sendCommand(ADS1256_CMD_SDATAC); // send out ADS1256_CMD_SDATAC command to stop continous reading mode.
   writeRegister(ADS1256_RADD_DRATE, drate); // write data rate register
   uint8_t bytemask = B00000111;
   uint8_t adcon = readRegister(ADS1256_RADD_ADCON);
   uint8_t byte2send = (adcon & ~bytemask) | gain;
+  bitWrite(byte2send,6,0);
+  bitWrite(byte2send,5,0);
   writeRegister(ADS1256_RADD_ADCON, byte2send);
   if (buffenable)
   {  
@@ -122,10 +138,51 @@ unsigned char ADS1256::readRegister(unsigned char reg)
   return readValue;
 }
 
+void ADS1256::PinMode(uint8_t Pin, uint8_t InOut)
+{
+  if (Pin > 3)
+  {
+    Pin = 3;
+  }
+  if (InOut > 1)
+  {
+    InOut = 0;
+  }
+  uint8_t DigitalIO = readRegister(ADS1256_RADD_IO);
+  uint8_t BitToWrite = Pin + 4;
+  bitWrite(DigitalIO, BitToWrite, InOut);
+  writeRegister(ADS1256_RADD_IO, DigitalIO);
+}
+
+bool ADS1256::DigitalRead(uint8_t Pin)
+{
+  if (Pin > 3)
+  {
+    Pin = 3;
+  }
+  uint8_t DigitalIO = readRegister(ADS1256_RADD_IO);
+  DigitalIO = readRegister(ADS1256_RADD_IO);
+  return bitRead(DigitalIO,Pin);
+}
+
+void ADS1256::DigitalWrite(uint8_t Pin, bool OffOn)
+{
+  if (Pin > 3)
+  {
+    Pin = 3;
+  }
+  uint8_t DigitalIO = readRegister(ADS1256_RADD_IO);
+  bitWrite(DigitalIO, Pin, OffOn);
+  writeRegister(ADS1256_RADD_IO, DigitalIO);
+}
+
 void ADS1256::sendCommand(unsigned char reg)
 {
   CSON();
-  waitDRDY();
+  if (UseReady)
+  {
+    waitDRDY();
+  }
   SPIBus->transfer(reg);
   delayMicroseconds(DelayT11); // t11 delay (4*tCLKIN 4*0.13 = 0.52 us)
   CSOFF();
@@ -146,6 +203,13 @@ void ADS1256::readTest()
   _midByte = SPIBus->transfer(ADS1256_CMD_WAKEUP);
   _lowByte = SPIBus->transfer(ADS1256_CMD_WAKEUP);
   CSOFF();
+  Serial.print("test:");
+  Serial.print(_highByte);
+  Serial.print(",");
+  Serial.print(_midByte);
+  Serial.print(",");
+  Serial.print(_lowByte);
+  Serial.print("\n");
 }
 
 float ADS1256::readCurrentChannel()
@@ -155,6 +219,9 @@ float ADS1256::readCurrentChannel()
   delayMicroseconds(DelayT6); // t6 delay (4*tCLKIN 50*0.13 = 6.5 us)
   float adsCode = read_float32();
   CSOFF();
+  //Serial.print("absCode:");
+  //Serial.print(adsCode);
+  //Serial.print("\n");
   return ((adsCode / 0x7FFFFF) * ((2 * _VREF) / (float)_pga)) * _conversionFactor;
 }
 
@@ -174,11 +241,18 @@ unsigned long ADS1256::read_uint24()
 {
   unsigned char _highByte, _midByte, _lowByte;
   unsigned long value;
-  _highByte = SPI.transfer(0);
-  _midByte  = SPI.transfer(0);
-  _lowByte  = SPI.transfer(0);
+  _highByte = SPIBus->transfer(0);
+  _midByte  = SPIBus->transfer(0);
+  _lowByte  = SPIBus->transfer(0);
   // Combine all 3-bytes to 24-bit data using byte shifting.
   value = ((long)_highByte << 16) + ((long)_midByte << 8) + ((long)_lowByte);
+  //Serial.print("bytes:");
+  //Serial.print(_highByte);
+  //Serial.print(",");
+  //Serial.print(_midByte);
+  //Serial.print(",");
+  //Serial.print(_lowByte);
+  //Serial.print("\n");
   return value;
 }
 
@@ -187,6 +261,9 @@ unsigned long ADS1256::read_uint24()
 long ADS1256::read_int32()
 {
   long value = read_uint24();
+  //Serial.print("uint24:");
+  //Serial.print(value);
+  //Serial.print("\n");
   if (value & 0x00800000) // if the 24 bit value is negative reflect it to 32bit
   {
     value |= 0xff000000;
@@ -199,6 +276,9 @@ long ADS1256::read_int32()
 float ADS1256::read_float32()
 {
   long value = read_int32();
+  //Serial.print("int32v:");
+  //Serial.print(value);
+  //Serial.print("\n");
   return (float)value;
 }
 
@@ -273,12 +353,20 @@ void ADS1256::setChannel(byte AIN_P, byte AIN_N)
       MUXN = ADS1256_MUXN_AINCOM;
   }
   MUX_CHANNEL = MUXP | MUXN;
-  CSON();
+  //Serial.print("Start MUX set.\n");
+  CSON(true);
   writeRegister(ADS1256_RADD_MUX, MUX_CHANNEL);
+  //Serial.print("MUX set ");
+  //Serial.print(AIN_P);
+  //Serial.print(",");
+  //Serial.print(AIN_N);
+  //Serial.print("\n");
   sendCommand(ADS1256_CMD_SYNC);
+  //Serial.print("SYNCED");
   sendCommand(ADS1256_CMD_WAKEUP);
-  CSOFF();
-
+  //Serial.print("WOKE");
+  CSOFF(true);
+  //Serial.print("CS off.\n");
 }
 
 /*
@@ -290,45 +378,69 @@ uint8_t ADS1256::getStatus()
   return readRegister(ADS1256_RADD_STATUS); 
 }
 
-SPISettings* ADS1263::GetSPISettings()
+SPISettings* ADS1256::GetSPISettings()
 {
   return &ConnectionSettings;
 }
 
-void ADS1256::CSON(bool Supression = false)
+void ADS1256::CSON(bool Supression)
 {
   if (Supression)
   {
     if (!SuppressCS)
     {
+      //Serial.print("CS start suppressed.");
       SPIBus->beginTransaction(ConnectionSettings);
       digitalWrite(CSPin, LOW);
       SuppressCS = true;
+      //Serial.print("CS start complete.");
     }
   }
   else
   {
-    SPIBus->beginTransaction(ConnectionSettings);
-    digitalWrite(CSPin, LOW);
+    if (!SuppressCS)
+    {
+      //Serial.print("CS start normal.");
+      SPIBus->beginTransaction(ConnectionSettings);
+      digitalWrite(CSPin, LOW);
+      //Serial.print("CS start complete.");
+    }
   }
 }
 
-void ADS1256::CSOFF(bool Supression = false)
+void ADS1256::CSOFF(bool Supression)
 {
   if (Supression)
   {
     if (SuppressCS)
     {
+      //Serial.print("CS end suppressed.");
       digitalWrite(CSPin, HIGH);
       SPIBus->endTransaction();
       SuppressCS = false;
+      //Serial.print("CS end complete.");
     }
   }
   else
   {
-    digitalWrite(CSPin, HIGH);
-    SPIBus->endTransaction();
+    if (!SuppressCS)
+    {
+      //Serial.print("CS start normal.");
+      digitalWrite(CSPin, HIGH);
+      SPIBus->endTransaction();
+      //Serial.print("CS end complete.");
+    }
   }
+}
+
+void ADS1256::CSON()
+{
+  CSON(false);
+}
+
+void ADS1256::CSOFF()
+{
+  CSOFF(false);
 }
 
 void ADS1256::waitDRDY()
@@ -336,16 +448,28 @@ void ADS1256::waitDRDY()
   bool KeepWaiting = true;
   uint32_t WaitStart = micros();
   bool PinState = true;
+  bool Ready = false;
+  uint8_t Status;
   while (KeepWaiting)
   {
-    PinState = digitalRead(pinDRDY);
-    if (!PinState)
+    if (UseReady)
+    {
+      PinState = digitalRead(ReadyPin);
+      Ready = !PinState;
+    }
+    else
+    {
+      Status = getStatus();
+      PinState = bitRead(Status,0);
+      Ready = !PinState;
+    }
+    if (Ready)
     {
       KeepWaiting = false;
     }
     else
     {
-      if ( (micros() - WaitStart) > 1000000)
+      if ( (micros() - WaitStart) > 500000)
       {
         Serial.println("ADS1256 error on waitDRDY.");
         KeepWaiting = false;
@@ -356,5 +480,19 @@ void ADS1256::waitDRDY()
 
 boolean ADS1256::isDRDY()
 {
-  return !digitalRead(pinDRDY);
-}	
+  bool PinState = true;
+  bool Ready = false;
+  uint8_t Status;
+  if (UseReady)
+  {
+    PinState = digitalRead(ReadyPin);
+    Ready = !PinState;
+  }
+  else
+  {
+    Status = getStatus();
+    PinState = bitRead(Status,0);
+    Ready = !PinState;
+  }
+  return Ready;
+}
