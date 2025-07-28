@@ -83,8 +83,9 @@
 #define ADS1256_DRATE_10SPS 0x23
 #define ADS1256_DRATE_5SPS 0x13
 #define ADS1256_DRATE_2_5SPS 0x03
+#define ADS1256_DRATE_NIL 0x00
 
-#define ADS1256_NOPIN 254
+#define ADS1256_NOPIN 255
 
 #include "Arduino.h"
 #include "SPI.h"
@@ -92,49 +93,68 @@
 class ADS1256
 {
     public:
+        static constexpr uint8_t NUM_DATA_RATES = 16;
+        static const uint8_t DATA_RATE_CODES[NUM_DATA_RATES];
+        static const float DATA_RATES[NUM_DATA_RATES];
+        static uint8_t dataRateCodeFromValue(float dataRate);
+        static float dataRateValueFromCode(uint8_t dataRate);
+
         ADS1256(SPIClass* spi, float clockspdMhz, float vref, uint8_t cspin, uint8_t readypin, uint8_t resetpin, uint8_t powerdownpin);
-        void begin(unsigned char drate, unsigned char gain, bool bufferenable);
-        void startConversion();
+        bool begin(unsigned char drate, unsigned char gain, bool bufferenable);
+        
+        
         float ReadAndSwitchChannels(byte channel);
+        void setChannel(byte AIP, byte AIN = -1);
+        
+        uint8_t getStatus();
+        void setDataRateCode(uint8_t dataRateCode);
+        uint8_t getDataRateCode();
+        float getDataRate();
+
+        void GPIOPinMode(uint8_t Pin, uint8_t InOut);
+        bool GPIOPinRead(uint8_t Pin);
+        void GPIOPinWrite(uint8_t Pin, bool OffOn);
+        
         void writeRegister(unsigned char reg, unsigned char wdata);
         unsigned char readRegister(unsigned char reg);
-        void sendCommand(unsigned char cmd);
-        float readCurrentChannel();
-        long readCurrentChannelRaw();
-        void setConversionFactor(float val);
-        void setChannel(byte channel);
-        void setChannel(byte AIP, byte AIN);
-        void PinMode(uint8_t Pin, uint8_t InOut);
-        bool DigitalRead(uint8_t Pin);
-        void DigitalWrite(uint8_t Pin, bool OffOn);
-        uint8_t getStatus();
-        void waitDRDY();
-        boolean isDRDY();
+        
+        void sync();
+        bool standby();
+        void wakeup();
+        
+        bool selfCalibrateAll();
+        bool selfCalibrateGain();
+        bool selfCalibrateOffset();
+        bool systemCalibrateGain();
+        bool systemCalibrateOffset();
+
+        void pulsePowerDown();
+        
+        float readDataFloat();
+        long readDataInt32();
+        
+        bool waitDRDY(uint32_t timeoutMicros = 500000);
+        bool isDRDY();
+        
         void setGain(uint8_t gain);
-        void readTest();
         SPISettings* GetSPISettings();
     private:
         SPIClass* SPIBus;
         SPISettings ConnectionSettings;
-        bool SuppressCS;
-        void CSON(bool Suppression);
-        void CSOFF(bool Suppression);
-        void CSON();
+        bool CSEnabled;
+        bool CSON();
         void CSOFF();
         unsigned long read_uint24();
         long read_int32();
         float read_float32();
         byte _pga;
         float _VREF;
-        float _conversionFactor;
-        bool UseReset;
-        bool UseReady;
-        bool UsePowerDown;
         uint8_t ResetPin;
         uint8_t ReadyPin;
         uint8_t PowerDownPin;
         uint8_t CSPin;
-        uint16_t DelayT11;
+        uint16_t DelayT11_4;
+        uint16_t DelayT11_24;
         uint16_t DelayT6;
 };
 
